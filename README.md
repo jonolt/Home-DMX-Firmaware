@@ -27,15 +27,15 @@ Exact User Interface depends on the project specific arduino programm. The brign
 
 #### Page 0
 
-It is used to adjust the brightness of the display and to show the temperature measured by the I2C temperature sensor.
+It is used to adjust the brightness of the display and set the start page. If start page is 0, start at last page. Settings are saved on page change. 
 
-#### Page X (1, ..., 9)
+#### Page X
 
-Each page stores one light scene. In my project I have 3 zones of WW/CW LED stripes which should be switched independently. The zones are divided into columns. With SW1 a column can be selected and with RV1 and RV2 the brightness can be adjusted. To switch pages SW2 and SW3 are used which are not on the board. 
+Each page stores one light scene. User interface depends on individual programming an indicator may apear when a scene is changed and not saved. Scene is saved when page is changed (reset to dicard changes).
 
 ## Firmware
 
-The scenes and the current page and current column are stored in the EPPROM. Each page/scene can store n 8-bit registers values to store DMX values.
+The scenes and the current page and current column are stored in the EPPROM. Each page/scene can store n 8-bit registers values to store DMX values. During runtime a the current scene is loaded into RAM to reduce epprom access.
 
 Code is more or less self explaining (sorry for the a bit cryptic math logic for pages). Be aware of the pointers in the trace method.
 
