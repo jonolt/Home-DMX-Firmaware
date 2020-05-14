@@ -1,44 +1,10 @@
 # Home DMX - Firmware
 
-is a simple arduino based DMX controller to controll led lights installed in your home to be used with DMX controllers and relais.
+see main branch for gerneral project description.
 
-The Hardware can be found in a extra git repository: [Home-DMX-Board](https://github.com/jonolt/Home-DMX-Board).
-
-This Project started with [Home-DMX-Control](https://github.com/jonolt/Home-DMX-Control). Firmware and hardware are now in two repositories.
-
-
-## Idea
-
-The selection for the lighting scene in daily use should be as simple as possible. Therefore exactly two push buttons are used to move up and down in a list of lighting scenes. Since I am not a fan of idle transformers, a conventional light switch is used in my application to switch the whole system on and off. In the same way a corresponding scene could be set.
-
-The individual scenes should be adjustable directly on the controller without additional hardware. The input of the scenes works like on lighting control desks without motor faders via potentiometer and buttons. To make the firmware easy (without programmer and co) and maintainable by everyone, an Arduino was used, because it has a USB converter and the IDE is easy to use and install.
-
-## End User Usage
-
-### Everyay Usage
-
-Use the two buttons (connecte do SW2 and SW3 on pcb) to change sceene, by going up and down an scene list.
-
-### Configuration
-
-Exact User Interface depends on the project specific arduino programm. The brigness values are set with two analog potis (one for each line). They work like in Ligthning Cosoles. A arrow up/down means the current poti value is below/above the software value. Chhanfing the poti value will not change the software value until bot values where matched once. This is shown when only a pipe is displayed.
+Firmaware for Board Version 2.0. Using only the PWM outputs to drive Meanwell LED-Drivers with 3 in 1 dimming.
 
 **External Power must be disconnected when programming the Ardino!**
-
-#### Page 0
-
-It is used to adjust the brightness of the display and set the start page. If start page is 0, start at last page. Settings are saved on page change. 
-
-#### Page X
-
-Each page stores one light scene. User interface depends on individual programming an indicator may apear when a scene is changed and not saved. Scene is saved when page is changed (reset to dicard changes).
-
-## Firmware
-
-The scenes and the current page and current column are stored in the EPPROM. Each page/scene can store n 8-bit registers values to store DMX values. During runtime a the current scene is loaded into RAM to reduce epprom access.
-
-Code is more or less self explaining (sorry for the a bit cryptic math logic for pages). Be aware of the pointers in the trace method.
-
 
 ## License and Copyright
 

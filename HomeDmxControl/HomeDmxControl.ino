@@ -1,69 +1,66 @@
-/* 
- *  Copyright (C) 2019, 2020 Johannes Nolte
- *   
- *  This program is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, version 2.1 only.
- *  
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *  
- *  Firmware for Board V1.
- */
+/*
+    Copyright (C) 2019, 2020 Johannes Nolte
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, version 2.1 only.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    Firmware for Board V2.0. PWM out only, SW in only.
+*/
 
 #include <Bounce2.h>  // https://github.com/thomasfredericks/Bounce2
 #include <Arduino.h>
 #include <SPI.h>
 #include <EEPROM.h>
-// use version 1.4! 1.5 may not work and needs testing
-#include <DMXSerial.h>  //https://github.com/mathertel/DMXSerial
 #include "dogm_7036.h"
 
 // pin assignment
-#define PIN_BACKLIGHT 11
 #define PIN_LED_STATUS 13
-#define PIN_ARDUINO_LED 12
-#define PIN_POTI_KW A0
-#define PIN_POTI_WW A1
+#define PIN_POTI_1 A0
+#define PIN_POTI_2 A1
 #define PIN_INTERUPT 7
-#define PIN_SW_UP A3
-#define PIN_SW_DOWN A4
-#define PIN_SW_COL A5
-#define PIN_RELAIS A2
-#define PIN_R232_REDE 4
+#define PIN_SW_2_UP A5
+#define PIN_SW_3_DOWN A4
+#define PIN_SW_1_COL A2
+#define PIN_PWM_1 5
+#define PIN_PWM_2 6
+#define PIN_PWM_3 9
+#define PIN_PWM_4 10
+#define PIN_LCD_RESET 8
+#define PIN_LCD_SCK 15
+#define PIN_LCD_SI 16
+#define PIN_LCD_RS 12
+#define PIN_LCD_CS 17
+#define PIN_LCD_BACKLIGHT 11
 
 // EEPROM/SYSVAR constants
 #define NUMBER_OF_SYSVAR 3
-#define EEPROM_BACKLIGHT 0
-#define EEPROM_PAGE_START 1
-#define EEPROM_PAGE_LAST 2
+#define SYSVAR_BACKLIGHT 0
+#define SYSVAR_PAGE_START 1
+#define SYSVAR_PAGE_LAST 2
 
 // channel and column numbers are 1 biased (similar to dmx)
-#define NUMBER_OF_CHANELS 7  //>=2
-#define NUMBER_OF_COLUMNS 3
+#define NUMBER_OF_CHANELS 4  //>=2
+#define NUMBER_OF_COLUMNS 2
 #define NUMBER_OF_PAGES 5
 
 // LCD instance and special characters
 dogm_7036 DOG;
-const byte DOG_ARROW_POS[] = {5, 9, 13};
+const byte DOG_ARROW_POS[] = {6, 13};
 const byte arrow_none[] = {0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01};
 const byte arrow_up[] = {0x01, 0x03, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01};
 const byte arrow_down[] = {0x01, 0x01, 0x01, 0x01, 0x01, 0x05, 0x03, 0x01};
-
-//A quire Value
-int trace_ww = false;
-int trace_kw = false;
-
-bool value_changed = true;
-bool column_changed = true;
-bool page_changed = true;
+const byte hline[] = {0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03};
 
 // Switches
-Bounce switch_col = Bounce(); // Instantiate a Bounce object
-Bounce switch_up = Bounce();
-Bounce switch_down = Bounce();
+Bounce switch1_col = Bounce();
+Bounce switch2_up = Bounce();
+Bounce switch3_down = Bounce();
 
 // State Variables
 byte cur_page_values[NUMBER_OF_CHANELS];
@@ -71,21 +68,26 @@ byte org_page_values[NUMBER_OF_CHANELS];
 byte cur_col;
 byte cur_page;
 byte cur_sys[NUMBER_OF_SYSVAR];
+byte org_sys[NUMBER_OF_SYSVAR];
 
-//O thers
+int trace_poti1 = false;
+int trace_poti2 = false;
+
+bool changed_value = true;
+bool changed_column = true;
+bool changed_page = true;
+
+// Others
 bool status_led = true;
 
 
 // Function Set
-void writeDMX();
 void set_toogle_status_led();
-void set_column_marker(int trace);
+void set_column_marker(int col, int row, int trace);
 void set_backlight();
 
 // Funtion Get
 void trace(int reg_val, byte poti_val, int trace);
-byte get_poti_ww_value();
-byte get_poti_kw_value();
 byte get_poti_value(int pin);
 
 // Funtion Low Level
@@ -105,50 +107,44 @@ int compute_reg(byte page, byte ch);
 void setup() {
 
   //Setup Display
-  DOG.initialize(5, 6, 8, 9, 10, 1, DOGM162); //byte p_cs, byte p_si, byte p_clk, byte p_rs, byte p_res, boolean sup_5V, byte lines
+  // p_si=p_clk=0 -> use hardware SPI
+  DOG.initialize(PIN_LCD_CS, 0, 0, PIN_LCD_RS, PIN_LCD_RESET, 1, DOGM162); //byte p_cs, byte p_si, byte p_clk, byte p_rs, byte p_res, boolean sup_5V, byte lines
   DOG.displ_onoff(true);
   DOG.cursor_onoff(false);
   DOG.define_char(0, arrow_none);
   DOG.define_char(1, arrow_up);
   DOG.define_char(2, arrow_down);
+  DOG.define_char(3, hline);
 
   //Setup Pins
-  pinMode(PIN_BACKLIGHT, OUTPUT);
-  digitalWrite(PIN_BACKLIGHT, LOW);
+  pinMode(PIN_LCD_BACKLIGHT, OUTPUT);
+  digitalWrite(PIN_LCD_BACKLIGHT, LOW);
 
   pinMode(PIN_LED_STATUS, OUTPUT);
   digitalWrite(PIN_LED_STATUS, HIGH);
-  pinMode(PIN_ARDUINO_LED, OUTPUT);
-  digitalWrite(PIN_ARDUINO_LED, HIGH);
-
-  pinMode(PIN_R232_REDE, OUTPUT);
-  digitalWrite(PIN_R232_REDE, HIGH);
-
-  pinMode(PIN_RELAIS, OUTPUT);
-  digitalWrite(PIN_RELAIS, LOW);
 
   // Setup Switches
-  switch_col.attach(PIN_SW_COL, INPUT);
-  switch_col.interval(25);
+  switch1_col.attach(PIN_SW_1_COL, INPUT);
+  switch1_col.interval(25);
 
-  switch_up.attach(PIN_SW_UP, INPUT);
-  switch_up.interval(25);
+  switch2_up.attach(PIN_SW_2_UP, INPUT);
+  switch2_up.interval(25);
 
-  switch_down.attach(PIN_SW_DOWN, INPUT);
-  switch_down.interval(25);
-
-  //Setup Communiication (DMX, Serial)
-  DMXSerial.init(DMXController);
+  switch3_down.attach(PIN_SW_3_DOWN, INPUT);
+  switch3_down.interval(25);
 
   // Load Data from EPPROM
   load_eeprom_sys(cur_sys);
-  if (cur_sys[EEPROM_PAGE_START] == 0) {
-    cur_page = cur_sys[EEPROM_PAGE_LAST];
+  load_eeprom_sys(org_sys);
+  if (cur_sys[SYSVAR_PAGE_START] == 0) {
+    cur_page = cur_sys[SYSVAR_PAGE_LAST];
   } else {
-    cur_page = cur_sys[EEPROM_PAGE_START];
+    cur_page = cur_sys[SYSVAR_PAGE_START];
     load_eeprom_ch_page();
   }
   cur_col = 1;
+
+  Serial.begin(9600);
 
 }
 
@@ -156,15 +152,15 @@ void setup() {
 void loop() {
 
   // Check Switches, updating cur_page and cur_col, toogle ch7
-  switch_col.update();
-  switch_up.update();
-  switch_down.update();
+  switch1_col.update();
+  switch2_up.update();
+  switch3_down.update();
 
-  if ( switch_col.rose() ) {
-    if (switch_col.previousDuration() > 1000) {
+  if ( switch1_col.rose() ) {
+    if (switch1_col.previousDuration() > 1000) {
       if (cur_page > 0) {
         toogle_byte(&cur_page_values[7 - 1]);
-        value_changed = true;
+        changed_value = true;
       } else {
         //toogle_byte(&cur_page_values[7-1]);
       }
@@ -174,22 +170,22 @@ void loop() {
         if (cur_col > NUMBER_OF_COLUMNS) {
           cur_col = 1;
         }
-        column_changed = true;
+        changed_column = true;
       } else {
-        cur_sys[EEPROM_PAGE_START]++;
-        if (cur_sys[EEPROM_PAGE_START] > NUMBER_OF_PAGES) {
-          cur_sys[EEPROM_PAGE_START] = 0;
+        cur_sys[SYSVAR_PAGE_START]++;
+        if (cur_sys[SYSVAR_PAGE_START] > NUMBER_OF_PAGES) {
+          cur_sys[SYSVAR_PAGE_START] = 0;
         }
-        value_changed = true;
+        changed_value = true;
       }
     }
   }
 
   int new_page = cur_page;
-  if (switch_up.rose()) {
+  if (switch2_up.rose()) {
     new_page++;
   }
-  if (switch_down.rose()) {
+  if (switch3_down.rose()) {
     new_page--;
   }
 
@@ -206,122 +202,106 @@ void loop() {
     }
     else {
       save_eeprom_sys(cur_sys);
+      load_eeprom_sys(org_sys);
     }
     cur_page = byte(new_page);
     load_eeprom_ch_page();
 
-    if (cur_sys[EEPROM_PAGE_START] == 0) {
-      cur_sys[EEPROM_PAGE_LAST] = cur_page;
+    if (cur_sys[SYSVAR_PAGE_START] == 0) {
+      cur_sys[SYSVAR_PAGE_LAST] = cur_page;
       // must be written to eeprom since it cant be saved by page change
-      set_eeprom_sys(EEPROM_PAGE_LAST, cur_page);
+      set_eeprom_sys(SYSVAR_PAGE_LAST, cur_page);
     }
-    page_changed = true;
+    changed_page = true;
   }
 
   // Check Poti Tracing
-  if (page_changed || column_changed) {
-    trace_ww = 999;
-    trace_kw = 999;
+  if (changed_page || changed_column) {
+    trace_poti1 = 999;
+    trace_poti2 = 999;
   }
 
   if (cur_page == 0) {
-    digitalWrite(PIN_ARDUINO_LED, HIGH);
-    trace(&cur_sys[EEPROM_BACKLIGHT], get_poti_kw_value(), &trace_kw);
+    trace(&cur_sys[SYSVAR_BACKLIGHT], get_poti_value(PIN_POTI_1), &trace_poti2);
   }
   else
   {
-    digitalWrite(PIN_ARDUINO_LED, LOW);
-    trace(&cur_page_values[2 * cur_col - 1 - 1], get_poti_ww_value(), &trace_ww);
-    trace(&cur_page_values[2 * cur_col - 1], get_poti_kw_value(), &trace_kw);
+    trace(&cur_page_values[2 * cur_col - 1 - 1], get_poti_value(PIN_POTI_1), &trace_poti1);
+    trace(&cur_page_values[2 * cur_col - 1], get_poti_value(PIN_POTI_2), &trace_poti2);
   }
 
-  // update LCD only when values have chnaged
+  // update LCD only when values have chnaged (without column markers)
   // value changed flag is set by set_eeprom funtions
-  if (value_changed || column_changed || page_changed) {
-
+  if (changed_value || changed_column || changed_page) {
+    String str_row_1 = "S ";
+    String str_row_2 = String(cur_page);
+    if (!compare_page_cur_vs_org() || !compare_sys_cur_vs_org()) {
+      str_row_2.concat("*");
+    }
+    else
+    {
+      str_row_2.concat(" ");
+    }
+    Serial.println(str_row_2);
     if (cur_page == 0) {
       DOG.position(1, 1);
-      DOG.string("S pagestart:");
+      str_row_1.concat("pagestart:");
       char buf[3];
-      sprintf(buf, " %03d   ", cur_sys[EEPROM_PAGE_START]);
-      DOG.string(buf);
-      DOG.position(1, 2);
-      DOG.string("0 intesity :");
-      sprintf(buf, " %03d   ", cur_sys[EEPROM_BACKLIGHT]);
-      DOG.string(buf);
+      sprintf(buf, " %03d   ", cur_sys[SYSVAR_PAGE_START]);
+      str_row_1.concat(buf);
+      DOG.position(3, 2);
+      str_row_2.concat("intesity :");
+      sprintf(buf, " %03d   ", cur_sys[SYSVAR_BACKLIGHT]);
+      str_row_2.concat(buf);
     } else {
-      // refresh display without the column marker
-      String strW;
-      if (cur_page_values[7 - 1] == 255) {
-        strW = "SxWW";
-      } else {
-        strW = "S WW";
-      }
-
-      String strK = String(cur_page);
-      if (!compare_cur_vs_org()) {
-        strK.concat("*KW");
-      }
-      else
-      {
-        strK.concat(" KW");
-      }
-
       for (int i = 1; i <= NUMBER_OF_COLUMNS; i++) {
-        char buf[3];
-        sprintf(buf, " %03d", cur_page_values[2 * (i - 1)]);
-        strW.concat(buf);
-        sprintf(buf, " %03d", cur_page_values[2 * (i - 1) + 1]);
-        strK.concat(buf);
+        char buf[5];
+        byte ch = 2 * i - 1;
+        sprintf(buf, "%c%1d: %03d", 0x03, ch, get_channel(ch));
+        str_row_1.concat(buf);
+        sprintf(buf, "%c%1d: %03d", 0x03, ch + 1, get_channel(ch + 1));
+        str_row_2.concat(buf);
       }
-      DOG.position(1, 1);
-      DOG.string(strW.c_str());
-      DOG.position(1, 2);
-      DOG.string(strK.c_str());
-    }
 
-    writeDMX();
-    digitalWrite(PIN_RELAIS, cur_page_values[7 - 1] & 1);
+    }
+    DOG.position(1, 1);
+    DOG.string(str_row_1.c_str());
+    DOG.position(1, 2);
+    DOG.string(str_row_2.c_str());
+
+    write_output();
     set_backlight();
   }
 
   // update the column marker at every cycle
   if (cur_page > 0) {
-    DOG.position(DOG_ARROW_POS[cur_col - 1], 1);
-    set_column_marker(trace_ww);
-    DOG.position(DOG_ARROW_POS[cur_col - 1], 2);
-    set_column_marker(trace_kw);
+    set_column_marker(DOG_ARROW_POS[cur_col - 1], 1, trace_poti1);
+    set_column_marker(DOG_ARROW_POS[cur_col - 1], 2, trace_poti2);
   }
   else {
-    DOG.position(13, 2);
-    set_column_marker(trace_kw);
+    set_column_marker(13, 2, trace_poti2);
   }
 
   set_toogle_status_led();
 
-  value_changed = false;
-  page_changed = false;
-  column_changed = false;
-
-  //    Serial.print(cur_page);
-  //    Serial.print(" | ");
-  //    for (int i = 0; i < 3; i++) {
-  //      Serial.print(cur_sys[i]);
-  //      Serial.print(" ");
-  //    }
-  //    Serial.print(" | ");
-  //    for (int i = 0; i < 40; i++) {
-  //      Serial.print(EEPROM.read(i));
-  //      Serial.print(" ");
-  //    }
-  //    Serial.println(" ");
+  changed_value = false;
+  changed_page = false;
+  changed_column = false;
 
   delay(20);
 
 }
 
+void write_output() {
+  analogWrite(PIN_PWM_1, 255 - get_channel(1));
+  analogWrite(PIN_PWM_2, 255 - get_channel(2));
+  analogWrite(PIN_PWM_3, 255 - get_channel(3));
+  analogWrite(PIN_PWM_4, 255 - get_channel(4));
+}
+
 // write column marker at current curser pusition of LCD
-void set_column_marker(int trace) {
+void set_column_marker(int col, int row, int trace) {
+  DOG.position(col, row);
   if (trace == 0) {
     DOG.ascii(0);
   } else if (trace < 0) {
@@ -329,21 +309,6 @@ void set_column_marker(int trace) {
   } else {
     DOG.ascii(2);
   }
-}
-
-// send values from EPPROM to dimmer
-void writeDMX() {
-  //RegalUnten
-  DMXSerial.write(1, cur_page_values[0]);
-  DMXSerial.write(2, cur_page_values[1]);
-  //RegalOben
-  DMXSerial.write(3, cur_page_values[2]);
-  DMXSerial.write(4, cur_page_values[3]);
-  //Glasswand
-  DMXSerial.write(5, cur_page_values[4]);
-  DMXSerial.write(6, cur_page_values[4]);
-  DMXSerial.write(7, cur_page_values[5]);
-  DMXSerial.write(8, cur_page_values[5]);
 }
 
 //togles the status LED indicating working code
@@ -363,7 +328,7 @@ void trace(byte* reg_val, byte poti_val, int* trace) {
   int dif = poti_val - *reg_val;
   if (*trace == 0) {
     *reg_val = poti_val;
-    value_changed = true;
+    changed_value = true;
   } else {
     if (abs(dif) <= 1) {
       *trace = 0;
@@ -374,7 +339,7 @@ void trace(byte* reg_val, byte poti_val, int* trace) {
   }
 }
 
-// toggle between 0 and 255
+// toggle between 0 and 255 (usefull for dmx)
 void toogle_byte(byte *b) {
   if (*b == 255) {
     *b = 0;
@@ -383,33 +348,37 @@ void toogle_byte(byte *b) {
   }
 }
 
-byte get_poti_ww_value() {
-  //returns a 8bit value for the ww (RV1) poti
-  return get_poti_value(PIN_POTI_WW);
-}
-
-byte get_poti_kw_value() {
-  //returns a 8bit value for the kw (RV2) poti
-  return get_poti_value(PIN_POTI_KW);
-}
-
 //returns a 8bit value for the poti, if new read to close to the ne one the
 inline byte get_poti_value(int pin) {
   return byte(analogRead(pin) / 4);
 }
 
 void set_backlight() {
-  analogWrite(PIN_BACKLIGHT, cur_sys[EEPROM_BACKLIGHT]);
+  analogWrite(PIN_LCD_BACKLIGHT, cur_sys[SYSVAR_BACKLIGHT]);
 }
 
 // return true if arrays are identical, else false
-bool compare_cur_vs_org() {
+bool compare_page_cur_vs_org() {
   for (byte i = 0; i < NUMBER_OF_CHANELS; i++) {
     if (cur_page_values[i] != org_page_values[i]) {
       return false;
     }
   }
   return true;
+}
+
+// return true if arrays are identical, else false
+bool compare_sys_cur_vs_org() {
+  for (byte i = 0; i < NUMBER_OF_SYSVAR; i++) {
+    if (cur_sys[i] != org_sys[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+byte get_channel(byte ch) {
+  return cur_page_values[ch - 1];
 }
 
 void load_eeprom_ch_page() {
@@ -471,15 +440,15 @@ void set_eeprom_ch(byte ch, byte val, byte page) {
 }
 
 
-// Setter for EEPROM_BACKLIGHT, EEPROM_PAGE, EPROME_COL ect.
+// Setter for SYSVAR_BACKLIGHT, EEPROM_PAGE, EPROME_COL ect.
 inline byte get_eeprom_sys(int identifier) {
   return EEPROM.read(identifier);
 }
 
-// Getter for EEPROM_BACKLIGHT, EEPROM_PAGE, EPROME_COL ect.
+// Getter for SYSVAR_BACKLIGHT, EEPROM_PAGE, EPROME_COL ect.
 inline void set_eeprom_sys(int identifier, byte val) {
   return EEPROM.update(identifier, val);
-  value_changed = true;
+  changed_value = true;
 }
 
 // Provides one place where the register value gets generated
