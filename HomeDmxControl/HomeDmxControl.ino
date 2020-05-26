@@ -222,7 +222,7 @@ void loop() {
   }
 
   if (cur_page == 0) {
-    trace(&cur_sys[SYSVAR_BACKLIGHT], get_poti_value(PIN_POTI_1), &trace_poti2);
+    trace(&cur_sys[SYSVAR_BACKLIGHT], get_poti_value(PIN_POTI_2), &trace_poti2);
   }
   else
   {
@@ -235,7 +235,7 @@ void loop() {
   if (changed_value || changed_column || changed_page) {
     String str_row_1 = "S ";
     String str_row_2 = String(cur_page);
-    if (!compare_page_cur_vs_org() || !compare_sys_cur_vs_org()) {
+    if (!compare_page_cur_vs_org() || cur_sys[0]!=org_sys[0] || cur_sys[1]!=org_sys[1] ) {
       str_row_2.concat("*");
     }
     else
